@@ -1,0 +1,26 @@
+{
+
+  "description": "Extension to decorate plain CSV data to table",
+  "manifest_version": 2,
+  "name": "CSV beautifier",
+  "version": "1.0",
+  "homepage_url": "https://github.com/sartor/csv-beautifier",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "background": {
+    "scripts": ["main.js"]
+  },
+  "browser_action": {
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "permissions": ["activeTab"]
+}

@@ -1,0 +1,14 @@
+table {
+    border-collapse: collapse;
+}
+
+td, th {
+    font-size: 12px;
+    font-family: sans-serif;
+    border-left: 1px solid gray;
+    padding: 2px;
+}
+
+tr:nth-child(even) {
+    background-color: lightgray;
+}
