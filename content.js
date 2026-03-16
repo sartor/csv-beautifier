@@ -20,6 +20,8 @@ function guessDelimiter(row) {
     return Object.keys(delimiters).reduce((a, b) => delimiters[a] > delimiters[b] ? a : b);
 }
 
+let sortState = { col: -1, asc: true };
+
 function insertTable(rows) {
     const tbl = document.createElement("table");
     tbl.style.fontSize = '12px';
@@ -27,16 +29,48 @@ function insertTable(rows) {
     tbl.style.borderCollapse = 'collapse';
     tbl.style.borderWidth = '1px';
 
-    tbl.appendChild(document.createElement("tbody"));
+    const thead = tbl.createTHead();
+    const headerRow = thead.insertRow(-1);
+    rows[0].forEach((cell, colIndex) => {
+        const th = document.createElement("th");
+        th.textContent = cell;
+        th.addEventListener('click', () => sortTable(tbl, colIndex));
+        headerRow.appendChild(th);
+    });
 
-    rows.forEach(row => {
-        const domRow = tbl.insertRow(-1);
+    const tbody = document.createElement("tbody");
+    tbl.appendChild(tbody);
+
+    rows.slice(1).forEach(row => {
+        const domRow = tbody.insertRow(-1);
         row.forEach(cell => {
             domRow.insertCell(-1).textContent = cell;
-        })
+        });
     });
 
     document.body.appendChild(tbl);
+}
+
+function sortTable(tbl, col) {
+    const tbody = tbl.tBodies[0];
+    const rows = Array.from(tbody.rows);
+    const asc = sortState.col === col ? !sortState.asc : true;
+    sortState = { col, asc };
+
+    rows.sort((a, b) => {
+        const cellA = a.cells[col];
+        const cellB = b.cells[col];
+        const va = cellA ? cellA.textContent : '';
+        const vb = cellB ? cellB.textContent : '';
+        const na = parseFloat(va), nb = parseFloat(vb);
+        const cmp = (!isNaN(na) && !isNaN(nb)) ? na - nb : va.localeCompare(vb);
+        return asc ? cmp : -cmp;
+    });
+    rows.forEach(row => tbody.appendChild(row));
+
+    Array.from(tbl.tHead.rows[0].cells).forEach((th, i) => {
+        th.dataset.sort = i === col ? (asc ? 'asc' : 'desc') : '';
+    });
 }
 
 function parse (s, dialect) {
