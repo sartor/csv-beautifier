@@ -58,8 +58,10 @@ function sortTable(tbl, col) {
     sortState = { col, asc };
 
     rows.sort((a, b) => {
-        const va = a.cells[col].textContent;
-        const vb = b.cells[col].textContent;
+        const cellA = a.cells[col];
+        const cellB = b.cells[col];
+        const va = cellA ? cellA.textContent : '';
+        const vb = cellB ? cellB.textContent : '';
         const na = parseFloat(va), nb = parseFloat(vb);
         const cmp = (!isNaN(na) && !isNaN(nb)) ? na - nb : va.localeCompare(vb);
         return asc ? cmp : -cmp;
