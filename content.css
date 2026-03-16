@@ -12,3 +12,17 @@ td, th {
 tr:nth-child(even) {
     background-color: lightgray;
 }
+
+th {
+    cursor: pointer;
+    user-select: none;
+    background-color: #e0e0e0;
+}
+
+th[data-sort="asc"]::after {
+    content: " \25b2";
+}
+
+th[data-sort="desc"]::after {
+    content: " \25bc";
+}
