@@ -14,9 +14,13 @@ tr:nth-child(even) {
 }
 
 th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
     cursor: pointer;
     user-select: none;
     background-color: #e0e0e0;
+    box-shadow: 0 1px 0 gray;
 }
 
 th[data-sort="asc"]::after {
