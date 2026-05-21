@@ -1,209 +1,333 @@
 const csv = document.body.textContent;
 document.body.textContent = '';
 
-const firstLine = csv.split("\n", 1)[0];
-const delimiter = guessDelimiter(firstLine);
+const DEFAULTS = {
+    light: { fg: '#1a1a1a', bg: '#ffffff', border: '#bdbdbd' },
+    dark:  { fg: '#e6e6e6', bg: '#1e1e1e', border: '#4a4a4a' },
+    fontSize: 12,
+    stripes: true,
+    alignNumbers: true,
+};
 
-//console.log("Delimiter recognized:", delimiter);
-insertTable(parse(csv, {delimiter}));
-//console.log('CSV converted to table');
+const settingsPromise = loadSettings();
+const parsed = parse(csv, guessDelimiter(csv));
 
-function guessDelimiter(row) {
-    const delimiters = {',': 0, ';': 0, "\t": 0};
-    for (let i = 0; i < row.length; i += 1) {
-        const c = row.charAt(i);
-        if (c === ',' || c === ';' || c === "\t") {
-            delimiters[c]++;
-        }
+settingsPromise.then(settings => {
+    applySettings(settings);
+    insertTable(parsed, settings);
+});
+
+function loadSettings() {
+    if (typeof browser === 'undefined' || !browser.storage) {
+        return Promise.resolve(DEFAULTS);
     }
-
-    return Object.keys(delimiters).reduce((a, b) => delimiters[a] > delimiters[b] ? a : b);
+    return browser.storage.local.get('settings').then(({ settings }) => ({
+        ...DEFAULTS,
+        ...(settings || {}),
+    }));
 }
 
-let sortState = { col: -1, asc: true };
-
-function insertTable(rows) {
-    const tbl = document.createElement("table");
-    tbl.style.fontSize = '12px';
-    tbl.style.fontFamily = 'sans-serif';
-    tbl.style.borderCollapse = 'collapse';
-    tbl.style.borderWidth = '1px';
-
-    const thead = tbl.createTHead();
-    const headerRow = thead.insertRow(-1);
-    rows[0].forEach((cell, colIndex) => {
-        const th = document.createElement("th");
-        th.textContent = cell;
-        th.addEventListener('click', () => sortTable(tbl, colIndex));
-        headerRow.appendChild(th);
-    });
-
-    const tbody = document.createElement("tbody");
-    tbl.appendChild(tbody);
-
-    rows.slice(1).forEach(row => {
-        const domRow = tbody.insertRow(-1);
-        row.forEach(cell => {
-            domRow.insertCell(-1).textContent = cell;
-        });
-    });
-
-    document.body.appendChild(tbl);
+function applySettings(s) {
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const palette = dark ? s.dark : s.light;
+    const root = document.documentElement.style;
+    root.setProperty('--cb-fg', palette.fg);
+    root.setProperty('--cb-bg', palette.bg);
+    root.setProperty('--cb-border', palette.border);
+    root.setProperty('--cb-font-size', s.fontSize + 'px');
+    document.body.classList.toggle('cb-no-stripes', !s.stripes);
 }
 
-function sortTable(tbl, col) {
-    const tbody = tbl.tBodies[0];
-    const rows = Array.from(tbody.rows);
-    const asc = sortState.col === col ? !sortState.asc : true;
-    sortState = { col, asc };
-
-    rows.sort((a, b) => {
-        const cellA = a.cells[col];
-        const cellB = b.cells[col];
-        const va = cellA ? cellA.textContent : '';
-        const vb = cellB ? cellB.textContent : '';
-        const na = parseFloat(va), nb = parseFloat(vb);
-        const cmp = (!isNaN(na) && !isNaN(nb)) ? na - nb : va.localeCompare(vb);
-        return asc ? cmp : -cmp;
-    });
-    rows.forEach(row => tbody.appendChild(row));
-
-    Array.from(tbl.tHead.rows[0].cells).forEach((th, i) => {
-        th.dataset.sort = i === col ? (asc ? 'asc' : 'desc') : '';
-    });
+function guessDelimiter(text) {
+    const end = text.indexOf('\n');
+    const limit = end === -1 ? text.length : end;
+    let commas = 0, semis = 0, tabs = 0;
+    for (let i = 0; i < limit; i += 1) {
+        const c = text.charCodeAt(i);
+        if (c === 44) commas++;
+        else if (c === 59) semis++;
+        else if (c === 9) tabs++;
+    }
+    if (tabs >= commas && tabs >= semis) return '\t';
+    if (semis >= commas) return ';';
+    return ',';
 }
 
-function parse (s, dialect) {
-    // When line terminator is not provided then we try to guess it
-    // and normalize it across the file.
-    s = normalizeLineTerminator(s, dialect);
+// Parses CSV in one pass. Also records, per column, whether every non-empty
+// value is a numeric literal — exposed on result.numericCols (Uint8Array).
+function parse(s, delimiter) {
+    const DELIM = delimiter.charCodeAt(0);
+    const QUOTE = 34;  // "
+    const CR = 13, LF = 10;
 
-    // Get rid of any trailing \n
-    const options = normalizeDialectOptions(dialect);
-    s = chomp(s, options.lineterminator);
+    const rows = [];
+    let row = [];
 
-    let cur = "", // The character we are currently processing.
-        inQuote = false,
-        fieldQuoted = false,
-        field = "", // Buffer for building up the current field
-        row = [],
-        out = [],
-        processField;
+    // Per-column numeric tracking, grown as columns are first seen.
+    // numHas[c] = saw at least one non-empty value; numAll[c] = all so far numeric.
+    let numHas = new Uint8Array(0);
+    let numAll = new Uint8Array(0);
 
-    processField = function(field) {
-        if (fieldQuoted !== true) {
-            // If field is empty set to null
-            if (field === "") {
-                field = null;
-                // If the field was not quoted and we are trimming fields, trim it
-            } else if (options.skipinitialspace === true) {
-                field = field.trim();
-            }
+    const len = s.length;
+    let i = 0;
+    let isHeader = true;
+    let colIdx = 0;
 
-            // Convert unquoted numbers to their appropriate types
-            if (/^\d+$/.test(field)) {
-                field = parseInt(field, 10);
-            } else if (/^\d*\.\d+$|^\d+\.\d*$/.test(field)) {
-                field = parseFloat(field);
-            }
-        }
-        return field;
-    };
+    while (i < len) {
+        // Parse one field starting at i.
+        let field;
+        let wasQuoted = false;
+        const c0 = s.charCodeAt(i);
 
-    for (let i = 0; i < s.length; i += 1) {
-        cur = s.charAt(i);
-
-        // If we are at a EOF or EOR
-        if (
-            inQuote === false &&
-            (cur === options.delimiter || cur === options.lineterminator)
-        ) {
-            field = processField(field);
-            // Add the current field to the current row
-            row.push(field);
-            // If this is EOR append row to output and flush row
-            if (cur === options.lineterminator) {
-                out.push(row);
-                row = [];
-            }
-            // Flush the field buffer
-            field = "";
-            fieldQuoted = false;
-        } else {
-            // If it's not a quotechar, add it to the field buffer
-            if (cur !== options.quotechar) {
-                field += cur;
-            } else {
-                if (!inQuote) {
-                    // We are not in a quote, start a quote
-                    inQuote = true;
-                    fieldQuoted = true;
-                } else {
-                    // Next char is quotechar, this is an escaped quotechar
-                    if (s.charAt(i + 1) === options.quotechar) {
-                        field += options.quotechar;
-                        // Skip the next char
-                        i += 1;
+        if (c0 === QUOTE) {
+            // Quoted field. Scan for closing quote, handling "" escapes.
+            wasQuoted = true;
+            i += 1;
+            let start = i;
+            let parts = null;     // built only if we hit an escaped quote
+            while (i < len) {
+                const ch = s.charCodeAt(i);
+                if (ch === QUOTE) {
+                    if (i + 1 < len && s.charCodeAt(i + 1) === QUOTE) {
+                        // escaped "" — collect segment, skip one quote
+                        if (parts === null) parts = [];
+                        parts.push(s.substring(start, i + 1));
+                        i += 2;
+                        start = i;
                     } else {
-                        // It's not escaping, so end quote
-                        inQuote = false;
+                        break;
                     }
+                } else {
+                    i += 1;
+                }
+            }
+            field = parts === null ? s.substring(start, i) : (parts.join('') + s.substring(start, i));
+            if (i < len) i += 1; // consume closing quote
+        } else {
+            // Unquoted field. Scan to delim / CR / LF.
+            const start = i;
+            while (i < len) {
+                const ch = s.charCodeAt(i);
+                if (ch === DELIM || ch === LF || ch === CR) break;
+                i += 1;
+            }
+            field = s.substring(start, i);
+            // skipinitialspace — only trim leading whitespace, matches old behavior cheaply
+            if (field.length > 0 && field.charCodeAt(0) === 32) field = field.replace(/^ +/, '');
+        }
+
+        // Numeric tracking. Only unquoted, non-empty fields count as "values".
+        if (!isHeader) {
+            if (colIdx >= numHas.length) {
+                const grown = colIdx + 1;
+                const newHas = new Uint8Array(grown);
+                const newAll = new Uint8Array(grown);
+                newHas.set(numHas);
+                newAll.set(numAll);
+                // newly grown columns: all-numeric defaults to 1 (true) until proven otherwise
+                for (let k = numHas.length; k < grown; k += 1) newAll[k] = 1;
+                numHas = newHas;
+                numAll = newAll;
+            }
+            if (!wasQuoted && field.length > 0) {
+                numHas[colIdx] = 1;
+                if (numAll[colIdx] === 1 && !isNumericLiteral(field)) {
+                    numAll[colIdx] = 0;
                 }
             }
         }
-    }
 
-    // Add the last field
-    field = processField(field);
-    row.push(field);
-    out.push(row);
+        row.push(field);
+        colIdx += 1;
 
-    // Expose the ability to discard initial rows
-    if (options.skipinitialrows) out = out.slice(options.skipinitialrows);
-
-    return out;
-}
-
-function normalizeLineTerminator(csvString, dialect) {
-    dialect = dialect || {};
-
-    // Try to guess line terminator if it's not provided.
-    if (!dialect.lineterminator) {
-        return csvString.replace(/(\r\n|\n|\r)/gm, "\n");
-    }
-    // if not return the string untouched.
-    return csvString;
-}
-
-function normalizeDialectOptions(options) {
-    // note lower case compared to CSV DDF
-    let out = {
-        delimiter: ",",
-        doublequote: true,
-        lineterminator: "\n",
-        quotechar: '"',
-        skipinitialspace: true,
-        skipinitialrows: 0
-    };
-
-    for (let key in options) {
-        if (key === "trim") {
-            out["skipinitialspace"] = options.trim;
-        } else if (options.hasOwnProperty(key)) {
-            out[key.toLowerCase()] = options[key];
+        if (i >= len) break;
+        const sep = s.charCodeAt(i);
+        if (sep === DELIM) {
+            i += 1;
+        } else {
+            // End of row (CR, LF, or CRLF).
+            if (sep === CR && i + 1 < len && s.charCodeAt(i + 1) === LF) i += 2;
+            else i += 1;
+            rows.push(row);
+            row = [];
+            isHeader = false;
+            colIdx = 0;
         }
     }
-    return out;
+
+    // Trailing field/row (file with no terminating newline).
+    if (row.length > 0) rows.push(row);
+
+    const numericCols = new Uint8Array(numHas.length);
+    for (let c = 0; c < numHas.length; c += 1) {
+        numericCols[c] = numHas[c] === 1 && numAll[c] === 1 ? 1 : 0;
+    }
+    rows.numericCols = numericCols;
+    return rows;
 }
 
+// Matches integer or decimal: 123, -1.5, .5, 5., +12. No exponents.
+function isNumericLiteral(s) {
+    const len = s.length;
+    if (len === 0) return false;
+    let i = 0;
+    const c0 = s.charCodeAt(0);
+    if (c0 === 43 || c0 === 45) { // + -
+        if (len === 1) return false;
+        i = 1;
+    }
+    let sawDigit = false;
+    let sawDot = false;
+    for (; i < len; i += 1) {
+        const c = s.charCodeAt(i);
+        if (c >= 48 && c <= 57) {
+            sawDigit = true;
+        } else if (c === 46 && !sawDot) {
+            sawDot = true;
+        } else {
+            return false;
+        }
+    }
+    return sawDigit;
+}
 
+let sortState = { col: -1, dir: 'none' };
+let tableData = null;      // 2D array, header at [0], same shape as parse() output
+let numericCols = null;    // Uint8Array, 1 = right-align column
+let rowOrder = null;       // Int32Array index into tableData[1..], current display order
+const collator = new Intl.Collator(undefined, { numeric: false, sensitivity: 'variant' });
 
-function chomp(s, lineTerminator) {
-    if (s.charAt(s.length - lineTerminator.length) !== lineTerminator) {
-        // Does not end with \n, just return string
-        return s;
+function insertTable(rows, settings) {
+    tableData = rows;
+    numericCols = settings.alignNumbers
+        ? rows.numericCols || new Uint8Array(rows[0].length)
+        : new Uint8Array(rows[0].length);
+
+    const colCount = rows[0].length;
+    const dataRowCount = rows.length - 1;
+    rowOrder = new Int32Array(dataRowCount);
+    for (let i = 0; i < dataRowCount; i += 1) rowOrder[i] = i + 1;
+
+    const tbl = document.createElement('table');
+
+    // Header (small — safe to build via DOM API).
+    const thead = tbl.createTHead();
+    const headerRow = thead.insertRow(-1);
+    for (let c = 0; c < colCount; c += 1) {
+        const th = document.createElement('th');
+        th.textContent = rows[0][c];
+        if (numericCols[c]) th.classList.add('cb-num');
+        const col = c;
+        th.addEventListener('click', () => sortTable(tbl, col));
+        headerRow.appendChild(th);
+    }
+
+    // Body — innerHTML in one shot for speed at 1M rows.
+    const tbody = document.createElement('tbody');
+    tbl.appendChild(tbody);
+    tbody.innerHTML = buildTbodyHTML(rows, rowOrder, colCount);
+
+    injectNumericColumnStyles(numericCols);
+    document.body.appendChild(tbl);
+}
+
+function buildTbodyHTML(rows, order, colCount) {
+    const out = new Array(order.length);
+    for (let r = 0; r < order.length; r += 1) {
+        const row = rows[order[r]];
+        let s = '<tr>';
+        for (let c = 0; c < colCount; c += 1) {
+            const v = row[c];
+            if (v === '' || v === null || v === undefined) {
+                s += '<td></td>';
+            } else {
+                s += '<td>' + escapeHTML(v) + '</td>';
+            }
+        }
+        s += '</tr>';
+        out[r] = s;
+    }
+    return out.join('');
+}
+
+function injectNumericColumnStyles(numCols) {
+    const selectors = [];
+    for (let c = 0; c < numCols.length; c += 1) {
+        if (numCols[c]) selectors.push('tbody td:nth-child(' + (c + 1) + ')');
+    }
+    if (selectors.length === 0) return;
+    const style = document.createElement('style');
+    style.textContent = selectors.join(', ') + ' { text-align: right; }';
+    document.head.appendChild(style);
+}
+
+// Minimal HTML escape — only what matters inside <td> text content.
+function escapeHTML(s) {
+    // Fast path: scan for any char needing escaping.
+    for (let i = 0; i < s.length; i += 1) {
+        const c = s.charCodeAt(i);
+        if (c === 38 || c === 60 || c === 62) {
+            return s.replace(/[&<>]/g, ch => ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : '&gt;');
+        }
+    }
+    return s;
+}
+
+function nextDir(prev) {
+    if (prev === 'none') return 'asc';
+    if (prev === 'asc')  return 'desc';
+    return 'none';
+}
+
+function sortTable(tbl, col) {
+    const dir = sortState.col === col ? nextDir(sortState.dir) : 'asc';
+    sortState = { col, dir };
+
+    const colCount = tableData[0].length;
+    const dataRowCount = tableData.length - 1;
+
+    if (dir === 'none') {
+        for (let i = 0; i < dataRowCount; i += 1) rowOrder[i] = i + 1;
     } else {
-        // Remove the \n
-        return s.substring(0, s.length - lineTerminator.length);
+        const asc = dir === 'asc';
+        const data = tableData;
+        const isNumeric = numericCols[col] === 1;
+
+        // Sort a plain Array (Int32Array.sort with comparator is slower in some engines).
+        const arr = new Array(dataRowCount);
+        for (let i = 0; i < dataRowCount; i += 1) arr[i] = rowOrder[i];
+
+        let cmp;
+        if (isNumeric) {
+            cmp = (a, b) => {
+                const va = data[a][col], vb = data[b][col];
+                const na = va === '' || va === null ? NaN : +va;
+                const nb = vb === '' || vb === null ? NaN : +vb;
+                if (isNaN(na) && isNaN(nb)) return 0;
+                if (isNaN(na)) return 1;
+                if (isNaN(nb)) return -1;
+                return asc ? na - nb : nb - na;
+            };
+        } else {
+            const collCompare = collator.compare;
+            cmp = (a, b) => {
+                const va = data[a][col] || '';
+                const vb = data[b][col] || '';
+                const c = collCompare(va, vb);
+                return asc ? c : -c;
+            };
+        }
+        arr.sort(cmp);
+        for (let i = 0; i < dataRowCount; i += 1) rowOrder[i] = arr[i];
+    }
+
+    // Rebuild tbody in one shot.
+    const tbody = tbl.tBodies[0];
+    tbody.innerHTML = buildTbodyHTML(tableData, rowOrder, colCount);
+
+    // Update sort indicators.
+    const ths = tbl.tHead.rows[0].cells;
+    for (let i = 0; i < ths.length; i += 1) {
+        ths[i].dataset.sort = (i === col && dir !== 'none') ? dir : '';
     }
 }

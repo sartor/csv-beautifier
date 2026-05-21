@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>CSV beautifier — Options</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            font-size: 13px;
+            padding: 12px;
+            min-width: 360px;
+        }
+        fieldset {
+            border: 1px solid #bdbdbd;
+            border-radius: 4px;
+            margin: 0 0 12px 0;
+            padding: 8px 12px 12px;
+        }
+        legend {
+            font-weight: bold;
+            padding: 0 4px;
+        }
+        .row {
+            display: flex;
+            align-items: center;
+            margin: 6px 0;
+        }
+        .row label {
+            flex: 0 0 110px;
+        }
+        .row input[type="color"] {
+            width: 40px;
+            height: 24px;
+            padding: 0;
+            border: 1px solid #bdbdbd;
+            background: none;
+        }
+        .actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        button {
+            padding: 4px 12px;
+        }
+        #status {
+            margin-left: 8px;
+            color: #2e7d32;
+        }
+    </style>
+</head>
+<body>
+    <fieldset>
+        <legend>Light theme</legend>
+        <div class="row">
+            <label for="light-fg">Font color</label>
+            <input type="color" id="light-fg">
+        </div>
+        <div class="row">
+            <label for="light-bg">Background</label>
+            <input type="color" id="light-bg">
+        </div>
+        <div class="row">
+            <label for="light-border">Border</label>
+            <input type="color" id="light-border">
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Dark theme</legend>
+        <div class="row">
+            <label for="dark-fg">Font color</label>
+            <input type="color" id="dark-fg">
+        </div>
+        <div class="row">
+            <label for="dark-bg">Background</label>
+            <input type="color" id="dark-bg">
+        </div>
+        <div class="row">
+            <label for="dark-border">Border</label>
+            <input type="color" id="dark-border">
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Table</legend>
+        <div class="row">
+            <label for="font-size">Font size</label>
+            <select id="font-size">
+                <option value="10">10px</option>
+                <option value="11">11px</option>
+                <option value="12">12px</option>
+                <option value="13">13px</option>
+                <option value="14">14px</option>
+            </select>
+        </div>
+        <div class="row">
+            <label for="stripes">Row stripes</label>
+            <input type="checkbox" id="stripes">
+        </div>
+        <div class="row">
+            <label for="align-numbers">Align numbers to right</label>
+            <input type="checkbox" id="align-numbers">
+        </div>
+    </fieldset>
+
+    <div class="actions">
+        <button id="save">Save</button>
+        <button id="reset">Reset to defaults</button>
+        <span id="status"></span>
+    </div>
+
+    <script src="options.js"></script>
+</body>
+</html>

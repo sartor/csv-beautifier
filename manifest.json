@@ -3,7 +3,7 @@
   "description": "Extension to decorate plain CSV data to table",
   "manifest_version": 2,
   "name": "CSV beautifier",
-  "version": "1.2",
+  "version": "1.3",
   "homepage_url": "https://github.com/sartor/csv-beautifier",
   "icons": {
     "16": "icons/icon-16.png",
@@ -22,5 +22,9 @@
       "128": "icons/icon-128.png"
     }
   },
-  "permissions": ["activeTab"]
+  "permissions": ["activeTab", "storage"],
+  "options_ui": {
+    "page": "options.html",
+    "browser_style": true
+  }
 }
